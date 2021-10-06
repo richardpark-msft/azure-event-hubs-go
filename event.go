@@ -23,7 +23,9 @@ package eventhub
 //	SOFTWARE
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
 	"reflect"
 	"strings"
 	"time"
@@ -50,6 +52,10 @@ type (
 		ID               string
 		message          *amqp.Message
 		SystemProperties *SystemProperties
+
+		Subject       string
+		CorrelationID string
+		ContentType   string
 	}
 
 	// SystemProperties are used to store properties that are set by the system.
@@ -189,6 +195,18 @@ func newEvent(data []byte, msg *amqp.Message) (*Event, error) {
 	if msg.Properties != nil {
 		if id, ok := msg.Properties.MessageID.(string); ok {
 			event.ID = id
+		}
+
+		if id, ok := msg.Properties.CorrelationID.(string); ok {
+			event.CorrelationID = id
+		}
+
+		event.Subject = msg.Properties.Subject
+		event.ContentType = msg.Properties.ContentType
+
+		amqpPropsText, err := json.MarshalIndent(msg.Properties, "", "  ")
+		if err == nil {
+			log.Printf("AMQP props: %s", amqpPropsText)
 		}
 	}
 
