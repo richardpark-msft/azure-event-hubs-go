@@ -37,7 +37,7 @@ import (
 	"github.com/Azure/azure-amqp-common-go/v3/conn"
 	"github.com/Azure/azure-amqp-common-go/v3/sas"
 	"github.com/Azure/azure-amqp-common-go/v3/uuid"
-	"github.com/Azure/azure-event-hubs-go/v3"
+	eventhub "github.com/Azure/azure-event-hubs-go/v3"
 	"github.com/Azure/azure-event-hubs-go/v3/persist"
 
 	"github.com/Azure/go-autorest/autorest/azure"
@@ -400,10 +400,13 @@ func (h *EventProcessorHost) setup(ctx context.Context) error {
 	if h.scheduler == nil {
 		h.leaser.SetEventHostProcessor(h)
 		h.checkpointer.SetEventHostProcessor(h)
+
+		// TODO: possible EnsureStore could return a blob error?
 		if err := h.leaser.EnsureStore(ctx); err != nil {
 			return err
 		}
 
+		// TODO: possible EnsureStore could return a blob error?
 		if err := h.checkpointer.EnsureStore(ctx); err != nil {
 			return err
 		}
@@ -411,7 +414,9 @@ func (h *EventProcessorHost) setup(ctx context.Context) error {
 		scheduler := newScheduler(h)
 
 		for _, partitionID := range h.partitionIDs {
+			// TODO: possible EnsureStore could return a blob error?
 			h.leaser.EnsureLease(ctx, partitionID)
+			// TODO: possible EnsureStore could return a blob error?
 			h.checkpointer.EnsureCheckpoint(ctx, partitionID)
 		}
 

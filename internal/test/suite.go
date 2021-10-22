@@ -33,7 +33,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Azure/azure-amqp-common-go/v3"
+	common "github.com/Azure/azure-amqp-common-go/v3"
 	mgmt "github.com/Azure/azure-sdk-for-go/services/eventhub/mgmt/2017-04-01/eventhub"
 	rm "github.com/Azure/azure-sdk-for-go/services/resources/mgmt/2017-05-10/resources"
 	"github.com/Azure/go-autorest/autorest/azure"
@@ -74,7 +74,48 @@ type (
 
 func init() {
 	rand.Seed(time.Now().Unix())
+	GetTestEnv()
+}
+
+type TestEnv struct {
+	SubscriptionID     string
+	Namespace          string
+	ResourceGroupName  string
+	Location           string
+	Env                azure.Environment
+	TagID              string
+	StorageAccountName string
+}
+
+// GetTestEnv gets all the required environment variables for tests.
+func GetTestEnv() TestEnv {
 	loadEnv()
+
+	testEnv := TestEnv{
+		SubscriptionID:     MustGetEnv("AZURE_SUBSCRIPTION_ID"),
+		Namespace:          MustGetEnv("EVENTHUB_NAMESPACE"),
+		ResourceGroupName:  MustGetEnv("TEST_EVENTHUB_RESOURCE_GROUP"),
+		Location:           MustGetEnv("TEST_EVENTHUB_LOCATION"),
+		StorageAccountName: os.Getenv("STORAGE_ACCOUNT_NAME"),
+		TagID:              RandomString("tag", 5),
+	}
+
+	envName := os.Getenv("AZURE_ENVIRONMENT")
+
+	if envName == "" {
+		testEnv.Env = azure.PublicCloud
+	} else {
+		var err error
+		env, err := azure.EnvironmentFromName(envName)
+
+		if err != nil {
+			panic(err)
+		}
+
+		testEnv.Env = env
+	}
+
+	return testEnv
 }
 
 // SetupSuite constructs the test suite from the environment and
@@ -84,23 +125,14 @@ func (suite *BaseSuite) SetupSuite() {
 		log.SetLevel(log.DebugLevel)
 	}
 
-	suite.SubscriptionID = MustGetEnv("AZURE_SUBSCRIPTION_ID")
-	suite.Namespace = MustGetEnv("EVENTHUB_NAMESPACE")
-	suite.ResourceGroupName = MustGetEnv("TEST_EVENTHUB_RESOURCE_GROUP")
-	suite.Location = MustGetEnv("TEST_EVENTHUB_LOCATION")
-	envName := os.Getenv("AZURE_ENVIRONMENT")
-	suite.TagID = RandomString("tag", 5)
+	env := GetTestEnv()
 
-	if envName == "" {
-		suite.Env = azure.PublicCloud
-	} else {
-		var err error
-		env, err := azure.EnvironmentFromName(envName)
-		if !suite.NoError(err) {
-			suite.FailNow("could not find env name")
-		}
-		suite.Env = env
-	}
+	suite.SubscriptionID = env.SubscriptionID
+	suite.Namespace = env.Namespace
+	suite.ResourceGroupName = env.ResourceGroupName
+	suite.Location = env.Location
+	suite.TagID = env.TagID
+	suite.Env = env.Env
 
 	if !suite.NoError(suite.ensureProvisioned(mgmt.SkuTierStandard)) {
 		suite.FailNow("failed provisioning")

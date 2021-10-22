@@ -139,8 +139,7 @@ func (cred *AADSASCredential) New(next pipeline.Policy, po *pipeline.PolicyOptio
 			request.URL.RawQuery = token.sas
 		}
 
-		response, err := next.Do(ctx, request)
-		return response, err
+		return next.Do(ctx, request)
 	})
 }
 

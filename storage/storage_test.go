@@ -24,14 +24,20 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"sync"
+	"testing"
 	"time"
 
 	"github.com/Azure/azure-amqp-common-go/v3/aad"
 	"github.com/Azure/azure-storage-blob-go/azblob"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/Azure/azure-event-hubs-go/v3/eph"
+	"github.com/Azure/azure-event-hubs-go/v3/internal/test"
+	"github.com/Azure/azure-event-hubs-go/v3/persist"
 )
 
 const (
@@ -62,6 +68,88 @@ func (ts *testSuite) TestLeaserStoreCreation() {
 	exists, err = leaser.StoreExists(ctx)
 	ts.NoError(err)
 	ts.True(exists)
+}
+
+func TestLeaserConcurrentStoring(t *testing.T) {
+	ch := make(chan struct{})
+	wg := sync.WaitGroup{}
+
+	env := test.GetTestEnv()
+
+	containerName := strings.ToLower(test.RandomString(fmt.Sprintf("concurrentstortest-%s", env.TagID), 4))
+
+	cred, err := NewAADSASCredential(env.SubscriptionID, env.ResourceGroupName, env.StorageAccountName, containerName, AADSASCredentialWithEnvironmentVars())
+	require.NoError(t, err)
+	leaser, err := NewStorageLeaserCheckpointer(cred, env.StorageAccountName, containerName, env.Env)
+	defer leaser.DeleteStore(context.Background())
+
+	tryToGetLease := func() {
+		defer wg.Done()
+		<-ch
+
+		cred, err := NewAADSASCredential(env.SubscriptionID, env.ResourceGroupName, env.StorageAccountName, containerName, AADSASCredentialWithEnvironmentVars())
+		require.NoError(t, err)
+		leaser, err := NewStorageLeaserCheckpointer(cred, env.StorageAccountName, containerName, env.Env)
+		require.NoError(t, err)
+
+		_, err = leaser.StoreExists(context.Background())
+		require.NoError(t, err)
+
+		for i := 0; i < 100; i++ {
+			_, _, err := leaser.AcquireLease(context.Background(), "0")
+			require.NoError(t, err)
+		}
+	}
+
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go tryToGetLease()
+	}
+
+	close(ch)
+	wg.Wait()
+}
+
+func TestLeaserConcurrentCheckpointStoring(t *testing.T) {
+	ch := make(chan struct{})
+	wg := sync.WaitGroup{}
+
+	env := test.GetTestEnv()
+
+	containerName := strings.ToLower(test.RandomString(fmt.Sprintf("concurrentstortest-%s", env.TagID), 4))
+
+	cred, err := NewAADSASCredential(env.SubscriptionID, env.ResourceGroupName, env.StorageAccountName, containerName, AADSASCredentialWithEnvironmentVars())
+	require.NoError(t, err)
+	leaser, err := NewStorageLeaserCheckpointer(cred, env.StorageAccountName, containerName, env.Env)
+	defer leaser.DeleteStore(context.Background())
+
+	tryToGetLease := func() {
+		defer wg.Done()
+		<-ch
+
+		cred, err := NewAADSASCredential(env.SubscriptionID, env.ResourceGroupName, env.StorageAccountName, containerName, AADSASCredentialWithEnvironmentVars())
+		require.NoError(t, err)
+		leaser, err := NewStorageLeaserCheckpointer(cred, env.StorageAccountName, containerName, env.Env)
+		require.NoError(t, err)
+
+		for i := 0; i < 100; i++ {
+			_, isOwner, err := leaser.RenewLease(context.Background(), "0")
+			require.NoError(t, err)
+
+			if isOwner {
+				cp := persist.NewCheckpoint("0", 0, time.Now())
+				require.NoError(t, leaser.UpdateCheckpoint(context.Background(), "0", cp))
+			}
+		}
+	}
+
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go tryToGetLease()
+	}
+
+	close(ch)
+	wg.Wait()
 }
 
 func (ts *testSuite) TestLeaserLeaseEnsure() {
